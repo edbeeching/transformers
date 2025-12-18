@@ -3996,6 +3996,8 @@ class Trainer:
         if output_dir is None:
             output_dir = self.args.output_dir
 
+        pc = getattr(self.accelerator, "parallelism_config", None)
+
         if is_torch_xla_available():
             self._save_tpu(output_dir)
         elif is_sagemaker_mp_enabled():
@@ -4006,10 +4008,9 @@ class Trainer:
                 self._save(output_dir, state_dict=state_dict)
             Path(os.path.join(output_dir, "user_content.pt")).touch()
         # We are in N-D parallelism if we have parallelism_config set, so we check accelerate if we're on a to_save rank
-        elif getattr(self.accelerator, "parallelism_config", None) is not None:
+        elif pc is not None and not (pc.sp_enabled and pc.sp_backend == "deepspeed"):
             # DeepSpeed SP already handles checkpoint saving below, so skip manual save in that case
-            pc = getattr(self.accelerator, "parallelism_config")
-            if self.accelerator.should_save_model and not (pc.sp_enabled and pc.sp_backend == "deepspeed"):
+            if self.accelerator.should_save_model:
                 self._save(output_dir)
         # If we drop to here, we're in 1D parallelism, so all ranks need to go to `save_pretrained`
         elif (tp_size := getattr(self.model, "_tp_size", 0)) is not None and tp_size > 1:
@@ -4137,7 +4138,7 @@ class Trainer:
                     state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"}
                 )
         else:
-            self.model.save_pretrained(output_dir, state_dict=state_dict)
+            self.model.save_pretrained(output_dir, state_dict=state_dict, save_original_format=False)
 
         if self.processing_class is not None:
             self.processing_class.save_pretrained(output_dir)
